@@ -137,24 +137,26 @@ export function WorkQueueDashboard() {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-[1200px] w-full mx-auto space-y-5">
-      <header>
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-          Clinician work assistant
-        </div>
-        <h1 className="text-2xl font-display font-semibold tracking-tight mt-1">
-          Today's Work
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          What still needs to be completed across your caseload.
-        </p>
-      </header>
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1200px] w-full mx-auto space-y-5">
+        <header>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+            Clinician work assistant
+          </div>
+          <h1 className="text-2xl font-display font-semibold tracking-tight mt-1">
+            Today's Work
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            What still needs to be completed across your caseload.
+          </p>
+        </header>
 
-      <TodaySection visits={todaysVisits} workflows={workflows} />
-      <InProgressSection items={inProgress} />
-      <AITasksSection tasks={aiTasks} />
-      <NewReferralsSection items={newReferrals} />
-      <CompletedSection items={completed} />
+        <TodaySection visits={todaysVisits} workflows={workflows} />
+        <InProgressSection items={inProgress} />
+        <AITasksSection tasks={aiTasks} />
+        <NewReferralsSection items={newReferrals} />
+        <CompletedSection items={completed} />
+      </div>
     </div>
   );
 }

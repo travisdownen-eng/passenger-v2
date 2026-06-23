@@ -95,10 +95,10 @@ interface AssistantQueueItem {
 }
 
 function assistantQueueItem(workflow: PatientWorkflow): AssistantQueueItem | null {
-  if (workflow.stageIndex <= 1 || workflow.stageIndex >= STAGE_ORDER.length) return null;
-  if (workflow.stageIndex === 2) {
+  if (workflow.patient.status === "pending_review") {
     return { workflow, status: "ready_for_review", source: "Referral Extraction" };
   }
+  if (workflow.stageIndex <= 2 || workflow.stageIndex >= STAGE_ORDER.length) return null;
   if (workflow.stageIndex === 3) {
     return { workflow, status: "ready_for_reconciliation", source: "Medication Images Uploaded" };
   }

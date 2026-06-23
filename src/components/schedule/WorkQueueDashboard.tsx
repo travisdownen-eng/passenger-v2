@@ -103,6 +103,31 @@ function deriveWorkflows(patients: Patient[], visits: Visit[]): PatientWorkflow[
   });
 }
 
+function todayVisitPriority(v: Visit): number {
+  if (v.status === "documentation_overdue") return 0;
+  if (v.visitType === "SOC") return 1;
+  if (v.visitType === "Reassessment") return 2;
+  if (v.visitType === "Recert") return 3;
+  return 4;
+}
+
+function compareTodayVisits(a: Visit, b: Visit): number {
+  const priority = todayVisitPriority(a) - todayVisitPriority(b);
+  if (priority !== 0) return priority;
+  if (a.status === "documentation_overdue" || b.status === "documentation_overdue") {
+    return (
+      (b.daysOverdue ?? 0) - (a.daysOverdue ?? 0) ||
+      a.date.localeCompare(b.date) ||
+      a.patientName.localeCompare(b.patientName)
+    );
+  }
+  return (
+    (a.time ?? "").localeCompare(b.time ?? "") ||
+    a.date.localeCompare(b.date) ||
+    a.patientName.localeCompare(b.patientName)
+  );
+}
+
 export function WorkQueueDashboard() {
   const { data: patients } = useSuspenseQuery(patientsQuery());
   const visits = useMemo(() => buildSchedule(patients), [patients]);
@@ -111,8 +136,8 @@ export function WorkQueueDashboard() {
   const todaysVisits = useMemo(() => {
     const todayISO = toISODate(today());
     return visits
-      .filter((v) => v.date === todayISO && v.status === "scheduled")
-      .sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
+      .filter((v) => v.status === "documentation_overdue" || (v.date === todayISO && v.status === "scheduled"))
+      .sort(compareTodayVisits);
   }, [visits]);
 
   const inProgress = workflows
@@ -272,6 +297,10 @@ function TodaySection({ visits, workflows }: { visits: Visit[]; workflows: Patie
 }
 
 function computeDueLabel(v: Visit): string | null {
+  if (v.status === "documentation_overdue") {
+    const days = v.daysOverdue ?? 0;
+    return days > 0 ? `${days} day${days === 1 ? "" : "s"} overdue` : "Documentation overdue";
+  }
   if (v.visitType === "SOC") return `Due by ${formatDate(v.date)}`;
   if (v.visitType === "Recert" || v.visitType === "Reassessment") {
     if (v.oasisDueDate) return `OASIS due ${formatDate(v.oasisDueDate)}`;

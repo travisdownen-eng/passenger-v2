@@ -5,10 +5,6 @@ import {
   CalendarClock,
   ListChecks,
   Sparkles,
-  Inbox,
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
   ChevronRight,
   Pill,
   PhoneCall,
@@ -52,17 +48,6 @@ const STAGE_ORDER: WorkflowStage[] = [
   "ready_for_ehr",
 ];
 
-const STAGE_LABEL: Record<WorkflowStage, string> = {
-  referral_received: "Referral Received",
-  referral_extracted: "Referral Extraction",
-  meds_uploaded: "Medication Upload",
-  recon_complete: "Medication Reconciliation",
-  interactions_reviewed: "Interaction Review",
-  physician_notified: "Physician Notification",
-  physician_responded: "Physician Response",
-  ready_for_ehr: "Ready for EHR Sync",
-};
-
 interface PatientWorkflow {
   patient: Patient;
   stageIndex: number; // how far along (0..STAGE_ORDER.length)
@@ -103,29 +88,30 @@ function deriveWorkflows(patients: Patient[], visits: Visit[]): PatientWorkflow[
   });
 }
 
-function todayVisitPriority(v: Visit): number {
-  if (v.status === "documentation_overdue") return 0;
-  if (v.visitType === "SOC") return 1;
-  if (v.visitType === "Reassessment") return 2;
-  if (v.visitType === "Recert") return 3;
-  return 4;
+interface AssistantQueueItem {
+  workflow: PatientWorkflow;
+  status: "ready_for_review" | "ready_for_reconciliation" | "pending_sync";
+  source: string;
 }
 
-function compareTodayVisits(a: Visit, b: Visit): number {
-  const priority = todayVisitPriority(a) - todayVisitPriority(b);
-  if (priority !== 0) return priority;
-  if (a.status === "documentation_overdue" || b.status === "documentation_overdue") {
-    return (
-      (b.daysOverdue ?? 0) - (a.daysOverdue ?? 0) ||
-      a.date.localeCompare(b.date) ||
-      a.patientName.localeCompare(b.patientName)
-    );
+function assistantQueueItem(workflow: PatientWorkflow): AssistantQueueItem | null {
+  if (workflow.stageIndex <= 1 || workflow.stageIndex >= STAGE_ORDER.length) return null;
+  if (workflow.stageIndex === 2) {
+    return { workflow, status: "ready_for_review", source: "Referral Extraction" };
   }
-  return (
-    (a.time ?? "").localeCompare(b.time ?? "") ||
-    a.date.localeCompare(b.date) ||
-    a.patientName.localeCompare(b.patientName)
-  );
+  if (workflow.stageIndex === 3) {
+    return { workflow, status: "ready_for_reconciliation", source: "Medication Images Uploaded" };
+  }
+  if (workflow.stageIndex === 7) {
+    return { workflow, status: "pending_sync", source: "Passenger Output" };
+  }
+  return { workflow, status: "ready_for_review", source: "Passenger Output" };
+}
+
+function assistantQueuePriority(item: AssistantQueueItem): number {
+  if (item.status === "pending_sync") return 0;
+  if (item.status === "ready_for_reconciliation") return 1;
+  return 2;
 }
 
 export function WorkQueueDashboard() {
@@ -136,22 +122,24 @@ export function WorkQueueDashboard() {
   const todaysVisits = useMemo(() => {
     const todayISO = toISODate(today());
     return visits
-      .filter((v) => v.status === "documentation_overdue" || (v.date === todayISO && v.status === "scheduled"))
-      .sort(compareTodayVisits);
+      .filter((v) => v.date === todayISO && v.status === "scheduled")
+      .sort(
+        (a, b) =>
+          (a.time ?? "").localeCompare(b.time ?? "") ||
+          a.date.localeCompare(b.date) ||
+          a.patientName.localeCompare(b.patientName),
+      );
   }, [visits]);
 
-  const inProgress = workflows
-    .filter((w) => w.stageIndex > 0 && w.stageIndex < STAGE_ORDER.length)
-    .sort((a, b) => a.lastWorkedDays - b.lastWorkedDays)
+  const assistantQueue = workflows
+    .map(assistantQueueItem)
+    .filter((item): item is AssistantQueueItem => item != null)
+    .sort(
+      (a, b) =>
+        assistantQueuePriority(a) - assistantQueuePriority(b) ||
+        a.workflow.lastWorkedDays - b.workflow.lastWorkedDays,
+    )
     .slice(0, 8);
-
-  const newReferrals = workflows
-    .filter((w) => w.stageIndex === 0)
-    .slice(0, 6);
-
-  const completed = workflows
-    .filter((w) => w.stageIndex >= STAGE_ORDER.length)
-    .slice(0, 6);
 
   const aiTasks = {
     discrepancies: workflows.reduce((n, w) => n + w.hasMedDiscrepancies, 0),
@@ -168,19 +156,15 @@ export function WorkQueueDashboard() {
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
             Clinician work assistant
           </div>
-          <h1 className="text-2xl font-display font-semibold tracking-tight mt-1">
-            Today's Work
-          </h1>
+          <h1 className="text-2xl font-display font-semibold tracking-tight mt-1">Today's Work</h1>
           <p className="text-sm text-muted-foreground mt-1">
             What still needs to be completed across your caseload.
           </p>
         </header>
 
+        <AssistantQueueSection items={assistantQueue} />
         <TodaySection visits={todaysVisits} workflows={workflows} />
-        <InProgressSection items={inProgress} />
         <AITasksSection tasks={aiTasks} />
-        <NewReferralsSection items={newReferrals} />
-        <CompletedSection items={completed} />
       </div>
     </div>
   );
@@ -209,10 +193,17 @@ function Section({
   }[tone];
   return (
     <section className="surface-card overflow-hidden">
-      <div className={cn("flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border", toneCls)}>
+      <div
+        className={cn(
+          "flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border",
+          toneCls,
+        )}
+      >
         <div className="flex items-center gap-2">
           <Icon className="size-4 text-muted-foreground" />
-          <h2 className="font-display font-semibold text-[13px] uppercase tracking-wide">{title}</h2>
+          <h2 className="font-display font-semibold text-[13px] uppercase tracking-wide">
+            {title}
+          </h2>
           {count != null && (
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-background border border-border text-foreground font-semibold">
               {count}
@@ -258,9 +249,9 @@ function visitTypeLabel(t: Visit["visitType"]): string {
 function TodaySection({ visits, workflows }: { visits: Visit[]; workflows: PatientWorkflow[] }) {
   const wfById = new Map(workflows.map((w) => [w.patient.id, w]));
   return (
-    <Section title="Today" icon={CalendarClock} count={visits.length} tone="primary">
+    <Section title="Today's Schedule" icon={CalendarClock} count={visits.length} tone="primary">
       {visits.length === 0 ? (
-        <Empty>No visits assigned today.</Empty>
+        <Empty>No visits scheduled today.</Empty>
       ) : (
         <ul className="divide-y divide-border">
           {visits.map((v) => {
@@ -271,12 +262,12 @@ function TodaySection({ visits, workflows }: { visits: Visit[]; workflows: Patie
                 <div className="min-w-0 flex-1">
                   <PatientName id={v.patientId} name={v.patientName} />
                   <div className="text-xs text-muted-foreground mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
-                    <span className="font-medium text-foreground/80">{visitTypeLabel(v.visitType)}</span>
+                    <span className="font-medium text-foreground/80">
+                      {visitTypeLabel(v.visitType)}
+                    </span>
                     {dueLabel && <span>· {dueLabel}</span>}
-                    {wf && wf.stageIndex > 0 && wf.stageIndex < STAGE_ORDER.length && (
-                      <span className="inline-flex items-center gap-1 text-warning-foreground">
-                        <Clock className="size-3" /> In progress
-                      </span>
+                    {wf && wf.stageIndex > 1 && wf.stageIndex < STAGE_ORDER.length && (
+                      <span>· Passenger output available</span>
                     )}
                   </div>
                 </div>
@@ -297,10 +288,6 @@ function TodaySection({ visits, workflows }: { visits: Visit[]; workflows: Patie
 }
 
 function computeDueLabel(v: Visit): string | null {
-  if (v.status === "documentation_overdue") {
-    const days = v.daysOverdue ?? 0;
-    return days > 0 ? `${days} day${days === 1 ? "" : "s"} overdue` : "Documentation overdue";
-  }
   if (v.visitType === "SOC") return `Due by ${formatDate(v.date)}`;
   if (v.visitType === "Recert" || v.visitType === "Reassessment") {
     if (v.oasisDueDate) return `OASIS due ${formatDate(v.oasisDueDate)}`;
@@ -309,21 +296,21 @@ function computeDueLabel(v: Visit): string | null {
   return null;
 }
 
-function InProgressSection({ items }: { items: PatientWorkflow[] }) {
+function AssistantQueueSection({ items }: { items: AssistantQueueItem[] }) {
   return (
     <Section
-      title="In Progress"
+      title="Pending Sync / Ready for Review"
       icon={ListChecks}
       count={items.length}
       tone="warning"
-      hint="Resume unfinished work"
+      hint="Passenger-prepared output"
     >
       {items.length === 0 ? (
-        <Empty>No patients with unfinished work.</Empty>
+        <Empty>No Passenger output ready for review or sync.</Empty>
       ) : (
         <ul className="divide-y divide-border">
-          {items.map((w) => (
-            <InProgressRow key={w.patient.id} wf={w} />
+          {items.map((item) => (
+            <AssistantQueueRow key={item.workflow.patient.id} item={item} />
           ))}
         </ul>
       )}
@@ -331,64 +318,42 @@ function InProgressSection({ items }: { items: PatientWorkflow[] }) {
   );
 }
 
-function InProgressRow({ wf }: { wf: PatientWorkflow }) {
+function AssistantQueueRow({ item }: { item: AssistantQueueItem }) {
+  const { workflow: wf } = item;
   const name = `${wf.patient.first_name} ${wf.patient.last_name}`;
-  const visitLabel = wf.todayVisit ? visitTypeLabel(wf.todayVisit.visitType) : "Start of Care";
-  const completed = STAGE_ORDER.slice(0, wf.stageIndex);
-  const pending = STAGE_ORDER.slice(wf.stageIndex, Math.min(wf.stageIndex + 4, STAGE_ORDER.length));
   const lastWorked =
     wf.lastWorkedDays === 0
       ? "Today"
       : wf.lastWorkedDays === 1
         ? "Yesterday"
         : `${wf.lastWorkedDays} days ago`;
-  const progressPct = Math.round((wf.stageIndex / STAGE_ORDER.length) * 100);
+  const statusLabel = {
+    ready_for_review: "Ready for Review",
+    ready_for_reconciliation: "Ready for Reconciliation",
+    pending_sync: "Pending Sync",
+  }[item.status];
 
   return (
-    <li className="px-4 py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <PatientName id={wf.patient.id} name={name} />
-            <span className="text-[11px] px-1.5 py-0.5 rounded bg-warning/15 text-warning-foreground border border-warning/30 font-medium">
-              {visitLabel} in progress
-            </span>
-          </div>
-          <div className="text-[11px] text-muted-foreground mt-1">
-            Last worked: <span className="text-foreground font-medium">{lastWorked}</span>
-          </div>
+    <li className="px-4 py-3 flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <PatientName id={wf.patient.id} name={name} />
+          <span className="text-[11px] px-1.5 py-0.5 rounded bg-warning/15 text-warning-foreground border border-warning/30 font-medium">
+            {statusLabel}
+          </span>
         </div>
-        <Link
-          to="/patients/$id"
-          params={{ id: wf.patient.id }}
-          className="text-xs font-medium text-primary hover:underline whitespace-nowrap shrink-0"
-        >
-          Resume <ChevronRight className="inline size-3" />
-        </Link>
-      </div>
-
-      <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
-        <div className="h-full bg-primary" style={{ width: `${progressPct}%` }} />
-      </div>
-
-      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-        <div>
-          {completed.slice(-3).map((s) => (
-            <div key={s} className="flex items-center gap-1.5 text-muted-foreground">
-              <CheckCircle2 className="size-3 text-success shrink-0" />
-              <span className="truncate">{STAGE_LABEL[s]}</span>
-            </div>
-          ))}
-        </div>
-        <div>
-          {pending.map((s) => (
-            <div key={s} className="flex items-center gap-1.5 text-foreground/80">
-              <span className="size-3 inline-block rounded-sm border border-muted-foreground/50 shrink-0" />
-              <span className="truncate">{STAGE_LABEL[s]}</span>
-            </div>
-          ))}
+        <div className="text-[11px] text-muted-foreground mt-1">
+          {item.source} · Last updated:{" "}
+          <span className="text-foreground font-medium">{lastWorked}</span>
         </div>
       </div>
+      <Link
+        to="/patients/$id"
+        params={{ id: wf.patient.id }}
+        className="text-xs font-medium text-primary hover:underline whitespace-nowrap shrink-0"
+      >
+        Open <ChevronRight className="inline size-3" />
+      </Link>
     </li>
   );
 }
@@ -464,77 +429,6 @@ function AITasksSection({
                 >
                   {t.count}
                 </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </Section>
-  );
-}
-
-function NewReferralsSection({ items }: { items: PatientWorkflow[] }) {
-  return (
-    <Section title="New Referrals" icon={Inbox} count={items.length}>
-      {items.length === 0 ? (
-        <Empty>No new referrals waiting for review.</Empty>
-      ) : (
-        <ul className="divide-y divide-border">
-          {items.map((w) => {
-            const name = `${w.patient.first_name} ${w.patient.last_name}`;
-            const status =
-              w.lastWorkedDays === 0
-                ? "Referral Received"
-                : w.lastWorkedDays < 2
-                  ? "Extraction Not Started"
-                  : "Needs Review";
-            return (
-              <li key={w.patient.id} className="px-4 py-2.5 flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <PatientName id={w.patient.id} name={name} />
-                  <div className="text-[11px] text-muted-foreground mt-0.5">{status}</div>
-                </div>
-                <Link
-                  to="/patients/$id"
-                  params={{ id: w.patient.id }}
-                  className="text-xs font-medium text-primary hover:underline whitespace-nowrap"
-                >
-                  Review <ChevronRight className="inline size-3" />
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </Section>
-  );
-}
-
-function CompletedSection({ items }: { items: PatientWorkflow[] }) {
-  return (
-    <Section title="Completed" icon={CheckCircle2} count={items.length} tone="success">
-      {items.length === 0 ? (
-        <Empty>No workflows completed yet.</Empty>
-      ) : (
-        <ul className="divide-y divide-border">
-          {items.map((w) => {
-            const name = `${w.patient.first_name} ${w.patient.last_name}`;
-            return (
-              <li key={w.patient.id} className="px-4 py-2.5 flex items-center gap-3">
-                <CheckCircle2 className="size-4 text-success shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <PatientName id={w.patient.id} name={name} />
-                  <div className="text-[11px] text-muted-foreground mt-0.5">
-                    All tasks complete · Ready for EHR sync
-                  </div>
-                </div>
-                <Link
-                  to="/patients/$id"
-                  params={{ id: w.patient.id }}
-                  className="text-xs font-medium text-muted-foreground hover:text-foreground whitespace-nowrap"
-                >
-                  View
-                </Link>
               </li>
             );
           })}

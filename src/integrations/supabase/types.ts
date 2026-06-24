@@ -233,6 +233,56 @@ export type Database = {
           },
         ]
       }
+      workflow_statuses: {
+        Row: {
+          created_at: string
+          id: string
+          patient_id: string
+          ready_to_sync_at: string | null
+          reviewed_at: string | null
+          source_id: string | null
+          source_table: string | null
+          state: Database["public"]["Enums"]["workflow_state"]
+          synced_at: string | null
+          updated_at: string
+          workflow_type: Database["public"]["Enums"]["workflow_type"]
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          patient_id: string
+          ready_to_sync_at?: string | null
+          reviewed_at?: string | null
+          source_id?: string | null
+          source_table?: string | null
+          state?: Database["public"]["Enums"]["workflow_state"]
+          synced_at?: string | null
+          updated_at?: string
+          workflow_type: Database["public"]["Enums"]["workflow_type"]
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          patient_id?: string
+          ready_to_sync_at?: string | null
+          reviewed_at?: string | null
+          source_id?: string | null
+          source_table?: string | null
+          state?: Database["public"]["Enums"]["workflow_state"]
+          synced_at?: string | null
+          updated_at?: string
+          workflow_type?: Database["public"]["Enums"]["workflow_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_statuses_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       visits: {
         Row: {
           anticipate_discharge: string | null
@@ -302,6 +352,8 @@ export type Database = {
         | "reconciled"
       patient_status: "pending_review" | "active" | "discharged" | "on_hold"
       reconciliation_status: "not_started" | "in_progress" | "completed"
+      workflow_state: "not_started" | "needs_review" | "ready_to_sync" | "synced"
+      workflow_type: "referral" | "medication" | "narrative" | "call"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -438,6 +490,8 @@ export const Constants = {
       ],
       patient_status: ["pending_review", "active", "discharged", "on_hold"],
       reconciliation_status: ["not_started", "in_progress", "completed"],
+      workflow_state: ["not_started", "needs_review", "ready_to_sync", "synced"],
+      workflow_type: ["referral", "medication", "narrative", "call"],
     },
   },
 } as const

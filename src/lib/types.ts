@@ -1,5 +1,7 @@
 export type PatientStatus = "pending_review" | "active" | "discharged" | "on_hold";
 export type ReconciliationStatus = "not_started" | "in_progress" | "completed";
+export type WorkflowType = "referral" | "medication" | "narrative" | "call";
+export type WorkflowState = "not_started" | "needs_review" | "ready_to_sync" | "synced";
 export type MedicationSource =
   | "referral"
   | "hospital"
@@ -95,4 +97,18 @@ export interface ReconciliationSession {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+}
+
+export interface WorkflowStatus {
+  id: string;
+  patient_id: string;
+  workflow_type: WorkflowType;
+  state: WorkflowState;
+  source_table: string | null;
+  source_id: string | null;
+  created_at: string;
+  updated_at: string;
+  reviewed_at: string | null;
+  ready_to_sync_at: string | null;
+  synced_at: string | null;
 }

@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 import {
   computeDiscrepancies,
   computeInteractions,
@@ -45,17 +46,63 @@ import {
   type PhysicianNotification,
   type ReconState,
 } from "@/lib/med-reconciliation";
+import type { ReconciliationStatus } from "@/lib/types";
 
 export const Route = createFileRoute("/patients/$id/reconcile")({
   head: () => ({ meta: [{ title: "Medication Assistant · Passenger" }] }),
   component: ReconcilePage,
 });
 
+async function saveReconciliationStatus(patientId: string, status: ReconciliationStatus) {
+  const { data: existing, error: selectError } = await supabase
+    .from("reconciliation_sessions")
+    .select("id")
+    .eq("patient_id", patientId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (selectError) {
+    console.error("Unable to load reconciliation session", selectError);
+    return;
+  }
+
+  const completed_at = status === "completed" ? new Date().toISOString() : null;
+  if (existing) {
+    const { error } = await supabase
+      .from("reconciliation_sessions")
+      .update({ status, completed_at })
+      .eq("id", existing.id);
+    if (error) console.error("Unable to update reconciliation session", error);
+    return;
+  }
+
+  const { error } = await supabase
+    .from("reconciliation_sessions")
+    .insert({ patient_id: patientId, status, completed_at });
+  if (error) console.error("Unable to create reconciliation session", error);
+}
+
+function hasPhotoSourcedMeds(state: ReconState): boolean {
+  return state.patient.some(
+    (med) =>
+      med.source === "camera" || med.source === "list_photo" || med.source === "bottle_photo",
+  );
+}
+
 function ReconcilePage() {
   const { id } = Route.useParams();
   const [state, setState] = useState<ReconState | null>(null);
+  const completedBackfillRef = useRef<string | null>(null);
 
   useEffect(() => setState(loadRecon(id)), [id]);
+
+  useEffect(() => {
+    if (state && hasPhotoSourcedMeds(state) && completedBackfillRef.current !== id) {
+      completedBackfillRef.current = id;
+      void saveReconciliationStatus(id, "completed");
+    }
+  }, [id, state]);
 
   const persist = (updater: (s: ReconState) => ReconState) => {
     setState((prev) => {
@@ -127,9 +174,16 @@ function ReconcilePage() {
           onChange={(meds) => persist((s) => ({ ...s, patient: meds }))}
           showExtract
           onExtract={(kind) => {
-            const extracted = mockExtract(kind);
-            persist((s) => ({ ...s, patient: [...s.patient, ...extracted] }));
-            toast.success(`AI extracted ${extracted.length} medication${extracted.length === 1 ? "" : "s"}`);
+            void (async () => {
+              await saveReconciliationStatus(id, "in_progress");
+              const extracted = mockExtract(kind);
+              persist((s) => ({ ...s, patient: [...s.patient, ...extracted] }));
+              await saveReconciliationStatus(id, "completed");
+              completedBackfillRef.current = id;
+              toast.success(
+                `AI extracted ${extracted.length} medication${extracted.length === 1 ? "" : "s"}`,
+              );
+            })();
           }}
         />
       </div>

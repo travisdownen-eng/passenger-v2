@@ -1,12 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import type {
-  Medication,
-  Patient,
-  ReconciliationSession,
-  ReferralDocument,
-  Visit,
-} from "./types";
+import type { Medication, Patient, ReconciliationSession, ReferralDocument, Visit } from "./types";
 
 export const patientsQuery = () =>
   queryOptions({
@@ -92,5 +86,22 @@ export const patientVisitsQuery = (id: string) =>
         .order("created_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as unknown as Visit[];
+    },
+  });
+
+export const generatedNarrativeVisitsQuery = () =>
+  queryOptions({
+    queryKey: ["visits", "generated-narrative"],
+    queryFn: async (): Promise<Visit[]> => {
+      const { data, error } = await supabase
+        .from("visits")
+        .select("*")
+        .not("generated_documentation", "is", null)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+      return ((data ?? []) as unknown as Visit[]).filter(
+        (visit) =>
+          Array.isArray(visit.generated_documentation) && visit.generated_documentation.length > 0,
+      );
     },
   });

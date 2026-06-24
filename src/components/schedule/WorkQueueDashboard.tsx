@@ -11,7 +11,7 @@ import {
   FileText,
   ShieldAlert,
 } from "lucide-react";
-import { patientsQuery } from "@/lib/queries";
+import { generatedNarrativeVisitsQuery, patientsQuery } from "@/lib/queries";
 import { buildSchedule, today, toISODate, type Visit } from "@/lib/visits";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
@@ -89,6 +89,7 @@ function deriveWorkflows(patients: Patient[], visits: Visit[]): PatientWorkflow[
 }
 
 interface AssistantQueueItem {
+  id: string;
   workflow: PatientWorkflow;
   status: "ready_for_review" | "ready_for_reconciliation" | "pending_sync";
   source: string;
@@ -96,16 +97,36 @@ interface AssistantQueueItem {
 
 function assistantQueueItem(workflow: PatientWorkflow): AssistantQueueItem | null {
   if (workflow.patient.status === "pending_review") {
-    return { workflow, status: "ready_for_review", source: "Referral Extraction" };
+    return {
+      id: `${workflow.patient.id}:referral-extraction`,
+      workflow,
+      status: "ready_for_review",
+      source: "Referral Extraction",
+    };
   }
   if (workflow.stageIndex <= 2 || workflow.stageIndex >= STAGE_ORDER.length) return null;
   if (workflow.stageIndex === 3) {
-    return { workflow, status: "ready_for_reconciliation", source: "Medication Images Uploaded" };
+    return {
+      id: `${workflow.patient.id}:medication-images`,
+      workflow,
+      status: "ready_for_reconciliation",
+      source: "Medication Images Uploaded",
+    };
   }
   if (workflow.stageIndex === 7) {
-    return { workflow, status: "pending_sync", source: "Passenger Output" };
+    return {
+      id: `${workflow.patient.id}:passenger-output-sync`,
+      workflow,
+      status: "pending_sync",
+      source: "Passenger Output",
+    };
   }
-  return { workflow, status: "ready_for_review", source: "Passenger Output" };
+  return {
+    id: `${workflow.patient.id}:passenger-output-review`,
+    workflow,
+    status: "ready_for_review",
+    source: "Passenger Output",
+  };
 }
 
 function assistantQueuePriority(item: AssistantQueueItem): number {
@@ -116,6 +137,7 @@ function assistantQueuePriority(item: AssistantQueueItem): number {
 
 export function WorkQueueDashboard() {
   const { data: patients } = useSuspenseQuery(patientsQuery());
+  const { data: generatedNarrativeVisits } = useSuspenseQuery(generatedNarrativeVisitsQuery());
   const visits = useMemo(() => buildSchedule(patients), [patients]);
   const workflows = useMemo(() => deriveWorkflows(patients, visits), [patients, visits]);
 
@@ -131,9 +153,21 @@ export function WorkQueueDashboard() {
       );
   }, [visits]);
 
-  const assistantQueue = workflows
-    .map(assistantQueueItem)
-    .filter((item): item is AssistantQueueItem => item != null)
+  const assistantQueue = [
+    ...workflows.map(assistantQueueItem).filter((item): item is AssistantQueueItem => item != null),
+    ...generatedNarrativeVisits.flatMap((visit) => {
+      const workflow = workflows.find((w) => w.patient.id === visit.patient_id);
+      if (!workflow) return [];
+      return [
+        {
+          id: `${visit.id}:narrative-documentation`,
+          workflow,
+          status: "ready_for_review" as const,
+          source: "Narrative Documentation",
+        },
+      ];
+    }),
+  ]
     .sort(
       (a, b) =>
         assistantQueuePriority(a) - assistantQueuePriority(b) ||
@@ -310,7 +344,7 @@ function AssistantQueueSection({ items }: { items: AssistantQueueItem[] }) {
       ) : (
         <ul className="divide-y divide-border">
           {items.map((item) => (
-            <AssistantQueueRow key={item.workflow.patient.id} item={item} />
+            <AssistantQueueRow key={item.id} item={item} />
           ))}
         </ul>
       )}

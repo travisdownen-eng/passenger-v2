@@ -284,6 +284,7 @@ export function saveBoxes(patientId: string, boxes: ExtractionBox[]) {
 
 export const MOCK_REFERRAL_PATIENTS = [
   {
+    mrn: "MOCK-REF-1001",
     first_name: "Margaret",
     last_name: "Whitaker",
     dob: "1948-03-22",
@@ -306,6 +307,7 @@ export const MOCK_REFERRAL_PATIENTS = [
     episode_end_date: "2026-08-13",
   },
   {
+    mrn: "MOCK-REF-1002",
     first_name: "Theodore",
     last_name: "Brennan",
     dob: "1952-11-04",
@@ -328,6 +330,7 @@ export const MOCK_REFERRAL_PATIENTS = [
     episode_end_date: "2026-08-14",
   },
   {
+    mrn: "MOCK-REF-1003",
     first_name: "Eleanor",
     last_name: "Vasquez",
     dob: "1939-07-18",

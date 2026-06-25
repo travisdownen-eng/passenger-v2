@@ -39,37 +39,57 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     await new Promise((r) => setTimeout(r, 400));
     toast.info("Pulling new referrals from EHR…");
 
-    // Pick the next mock referral and create a new patient row.
+    // Pick the next mock referral and sync by stable mock MRN.
     const mock = MOCK_REFERRAL_PATIENTS[mockIndex % MOCK_REFERRAL_PATIENTS.length];
     setMockIndex((i) => i + 1);
 
-    const { data, error } = await supabase
+    const patientPayload = {
+      mrn: mock.mrn,
+      first_name: mock.first_name,
+      last_name: mock.last_name,
+      dob: mock.dob,
+      gender: mock.gender,
+      code_status: mock.code_status,
+      address: mock.address,
+      phone: mock.phone,
+      primary_diagnosis: mock.primary_diagnosis,
+      hospitalization_reason: mock.hospitalization_reason,
+      home_health_reason: mock.home_health_reason,
+      past_medical_history: mock.past_medical_history,
+      precautions: mock.precautions,
+      allergies: mock.allergies,
+      admit_date: mock.admit_date,
+      discharge_date: mock.discharge_date,
+      surgery_date: (mock as { surgery_date?: string }).surgery_date ?? null,
+      physician_name: mock.physician_name,
+      physician_phone: mock.physician_phone,
+      episode_start_date: mock.episode_start_date,
+      episode_end_date: mock.episode_end_date,
+      status: "pending_review" as const,
+    };
+
+    const { data: existing, error: lookupError } = await supabase
       .from("patients")
-      .insert({
-        first_name: mock.first_name,
-        last_name: mock.last_name,
-        dob: mock.dob,
-        gender: mock.gender,
-        code_status: mock.code_status,
-        address: mock.address,
-        phone: mock.phone,
-        primary_diagnosis: mock.primary_diagnosis,
-        hospitalization_reason: mock.hospitalization_reason,
-        home_health_reason: mock.home_health_reason,
-        past_medical_history: mock.past_medical_history,
-        precautions: mock.precautions,
-        allergies: mock.allergies,
-        admit_date: mock.admit_date,
-        discharge_date: mock.discharge_date,
-        surgery_date: (mock as { surgery_date?: string }).surgery_date ?? null,
-        physician_name: mock.physician_name,
-        physician_phone: mock.physician_phone,
-        episode_start_date: mock.episode_start_date,
-        episode_end_date: mock.episode_end_date,
-        status: "pending_review",
-      })
-      .select()
-      .single();
+      .select("id")
+      .eq("mrn", mock.mrn)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (lookupError) {
+      toast.error(`Sync failed: ${lookupError.message}`);
+      setState((s) => ({ ...s, syncing: false }));
+      return;
+    }
+
+    const { data, error } = existing
+      ? await supabase
+          .from("patients")
+          .update(patientPayload)
+          .eq("id", existing.id)
+          .select()
+          .single()
+      : await supabase.from("patients").insert(patientPayload).select().single();
 
     if (error) {
       toast.error(`Sync failed: ${error.message}`);
